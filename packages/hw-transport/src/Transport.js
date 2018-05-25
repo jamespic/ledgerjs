@@ -1,6 +1,7 @@
 //@flow
 
 import EventEmitter from "events";
+import {Mutex} from 'async-mutex';
 
 /**
  */
@@ -330,7 +331,7 @@ TransportFoo.create().then(transport => ...)
     }
   }
 
-  _appAPIlock = null;
+  _appAPIlock = new Mutex();
   decorateAppAPIMethod<R, A: any[]>(
     methodName: string,
     f: (...args: A) => Promise<R>,
@@ -338,25 +339,12 @@ TransportFoo.create().then(transport => ...)
     scrambleKey: string
   ): (...args: A) => Promise<R> {
     return async (...args) => {
-      const { _appAPIlock } = this;
-      if (_appAPIlock) {
-        const e = new TransportError(
-          "Ledger Device is busy (lock " + _appAPIlock + ")",
-          "TransportLocked"
-        );
-        //$FlowFixMe
-        Object.assign(e, {
-          currentLock: _appAPIlock,
-          methodName
-        });
-        return Promise.reject(e);
-      }
+      let release = await this._appAPIlock.acquire()
       try {
-        this._appAPIlock = methodName;
         this.setScrambleKey(scrambleKey);
         return await f.apply(ctx, args);
       } finally {
-        this._appAPIlock = null;
+        release()
       }
     };
   }

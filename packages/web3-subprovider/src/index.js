@@ -70,7 +70,7 @@ engine.start();
 const web3 = new Web3(engine);
  */
 export default function createLedgerSubprovider(
-  getTransport: () => Transport<*>,
+  transport: Promise<Transport<*>>,
   options?: SubproviderOptions
 ): HookedWalletSubprovider {
   const { networkId, path, askConfirm, accountsLength, accountsOffset } = {
@@ -93,85 +93,70 @@ export default function createLedgerSubprovider(
   const addressToPathMap = {};
 
   async function getAccounts() {
-    const transport = await getTransport();
-    try {
-      const eth = new AppEth(transport);
-      const addresses = {};
-      for (let i = accountsOffset; i < accountsOffset + accountsLength; i++) {
-        const path =
-          pathComponents.basePath + (pathComponents.index + i).toString();
-        const address = await eth.getAddress(path, askConfirm, false);
-        addresses[path] = address.address;
-        addressToPathMap[address.address.toLowerCase()] = path;
-      }
-      return addresses;
-    } finally {
-      transport.close();
+    const eth = new AppEth(await transport);
+    const addresses = {};
+    for (let i = accountsOffset; i < accountsOffset + accountsLength; i++) {
+      const path =
+        pathComponents.basePath + (pathComponents.index + i).toString();
+      const address = await eth.getAddress(path, askConfirm, false);
+      addresses[path] = address.address;
+      addressToPathMap[address.address.toLowerCase()] = path;
     }
+    return addresses;
   }
 
   async function signPersonalMessage(msgData) {
     const path = addressToPathMap[msgData.from.toLowerCase()];
     if (!path) throw new Error("address unknown '" + msgData.from + "'");
-    const transport = await getTransport();
-    try {
-      const eth = new AppEth(transport);
-      const result = await eth.signPersonalMessage(
-        path,
-        stripHexPrefix(msgData.data)
-      );
-      const v = parseInt(result.v, 10) - 27;
-      let vHex = v.toString(16);
-      if (vHex.length < 2) {
-        vHex = `0${v}`;
-      }
-      return `0x${result.r}${result.s}${vHex}`;
-    } finally {
-      transport.close();
+    const eth = new AppEth(await transport);
+    const result = await eth.signPersonalMessage(
+      path,
+      stripHexPrefix(msgData.data)
+    );
+    const v = parseInt(result.v, 10) - 27;
+    let vHex = v.toString(16);
+    if (vHex.length < 2) {
+      vHex = `0${v}`;
     }
+    return `0x${result.r}${result.s}${vHex}`;
   }
 
   async function signTransaction(txData) {
     const path = addressToPathMap[txData.from.toLowerCase()];
     if (!path) throw new Error("address unknown '" + txData.from + "'");
-    const transport = await getTransport();
-    try {
-      const eth = new AppEth(transport);
-      const tx = new EthereumTx(txData);
+    const eth = new AppEth(await transport);
+    const tx = new EthereumTx(txData);
 
-      // Set the EIP155 bits
-      tx.raw[6] = Buffer.from([networkId]); // v
-      tx.raw[7] = Buffer.from([]); // r
-      tx.raw[8] = Buffer.from([]); // s
+    // Set the EIP155 bits
+    tx.raw[6] = Buffer.from([networkId]); // v
+    tx.raw[7] = Buffer.from([]); // r
+    tx.raw[8] = Buffer.from([]); // s
 
-      // Pass hex-rlp to ledger for signing
-      const result = await eth.signTransaction(
-        path,
-        tx.serialize().toString("hex")
+    // Pass hex-rlp to ledger for signing
+    const result = await eth.signTransaction(
+      path,
+      tx.serialize().toString("hex")
+    );
+
+    // Store signature in transaction
+    tx.v = Buffer.from(result.v, "hex");
+    tx.r = Buffer.from(result.r, "hex");
+    tx.s = Buffer.from(result.s, "hex");
+
+    // EIP155: v should be chain_id * 2 + {35, 36}
+    const signedChainId = Math.floor((tx.v[0] - 35) / 2);
+    const validChainId = networkId & 0xff; // FIXME this is to fixed a current workaround that app don't support > 0xff
+    if (signedChainId !== validChainId) {
+      throw makeError(
+        "Invalid networkId signature returned. Expected: " +
+          networkId +
+          ", Got: " +
+          signedChainId,
+        "InvalidNetworkId"
       );
-
-      // Store signature in transaction
-      tx.v = Buffer.from(result.v, "hex");
-      tx.r = Buffer.from(result.r, "hex");
-      tx.s = Buffer.from(result.s, "hex");
-
-      // EIP155: v should be chain_id * 2 + {35, 36}
-      const signedChainId = Math.floor((tx.v[0] - 35) / 2);
-      const validChainId = networkId & 0xff; // FIXME this is to fixed a current workaround that app don't support > 0xff
-      if (signedChainId !== validChainId) {
-        throw makeError(
-          "Invalid networkId signature returned. Expected: " +
-            networkId +
-            ", Got: " +
-            signedChainId,
-          "InvalidNetworkId"
-        );
-      }
-
-      return `0x${tx.serialize().toString("hex")}`;
-    } finally {
-      transport.close();
     }
+
+    return `0x${tx.serialize().toString("hex")}`;
   }
 
   const subprovider = new HookedWalletSubprovider({
