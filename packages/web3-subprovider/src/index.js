@@ -52,7 +52,7 @@ const defaultOptions = {
 
 /**
  * Create a HookedWalletSubprovider for Ledger devices.
- * @param getTransport gets lazily called each time the device is needed. It is a function that returns a Transport instance. You can typically give `()=>TransportU2F.create()`
+ * @param transport a promise that contains a Transport instance. You can typically give `TransportU2F.create()`
  * @example
 import Web3 from "web3";
 import createLedgerSubprovider from "@ledgerhq/web3-subprovider";
@@ -60,8 +60,8 @@ import TransportU2F from "@ledgerhq/hw-transport-u2f";
 import ProviderEngine from "web3-provider-engine";
 import RpcSubprovider from "web3-provider-engine/subproviders/rpc";
 const engine = new ProviderEngine();
-const getTransport = () => TransportU2F.create();
-const ledger = createLedgerSubprovider(getTransport, {
+const transport = TransportU2F.create();
+const ledger = createLedgerSubprovider(transport, {
   accountsLength: 5
 });
 engine.addProvider(ledger);
@@ -91,6 +91,7 @@ export default function createLedgerSubprovider(
   const pathComponents = obtainPathComponentsFromDerivationPath(path);
 
   const addressToPathMap = {};
+  let lastAddresses = {}
 
   async function getAccounts() {
     const eth = new AppEth(await transport);
@@ -99,10 +100,15 @@ export default function createLedgerSubprovider(
       const path =
         pathComponents.basePath + (pathComponents.index + i).toString();
       const address = await eth.getAddress(path, askConfirm, false);
+      if (lastAddresses[path] == address.address) {
+        // If this address matches the same one from the last call, short circuit and return that
+        return Object.assign({}, lastAddresses)
+      }
       addresses[path] = address.address;
       addressToPathMap[address.address.toLowerCase()] = path;
     }
-    return addresses;
+    lastAddresses = addresses
+    return Object.assign({}, addresses);
   }
 
   async function signPersonalMessage(msgData) {
