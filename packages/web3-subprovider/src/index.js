@@ -5,8 +5,6 @@ import HookedWalletSubprovider from "web3-provider-engine/dist/es5/subproviders/
 import stripHexPrefix from "strip-hex-prefix";
 import EthereumTx from "ethereumjs-tx";
 
-const allowedHdPaths = ["44'/1'", "44'/60'", "44'/61'"];
-
 function makeError(msg, id) {
   const err = new Error(msg);
   // $FlowFixMe
@@ -14,17 +12,20 @@ function makeError(msg, id) {
   return err;
 }
 
-function obtainPathComponentsFromDerivationPath(derivationPath) {
-  // check if derivation path follows 44'/60'/x'/n pattern
-  const regExp = /^(44'\/(?:1|60|61)'\/\d+'?\/)(\d+)$/;
-  const matchResult = regExp.exec(derivationPath);
-  if (matchResult === null) {
-    throw makeError(
-      "To get multiple accounts your derivation path must follow pattern 44'/60|61'/x'/n ",
-      "InvalidDerivationPath"
-    );
+export function pathFromIndex(pathTemplate, index) {
+  if (pathTemplate.includes('x')) {
+    return pathTemplate.replace(
+      /\/x\s*\+\s*(\d+)/g, // handle "/x + n" segments
+      (x, n) => `/${parseInt(n) + index}`
+    ).replace(
+      /\/x/g, `/${index}` // handle "/x" segments
+    )
+  } else {
+    return pathTemplate.replace(
+      /\/(\d+)('?)$/, // If "x" isn't found in path, add index to last segment
+      (x, n, h) => `/${parseInt(n) + index}${h}`
+    )
   }
-  return { basePath: matchResult[1], index: parseInt(matchResult[2], 10) };
 }
 
 /**
@@ -73,22 +74,10 @@ export default function createLedgerSubprovider(
   transport: Promise<Transport<*>>,
   options?: SubproviderOptions
 ): HookedWalletSubprovider {
-  const { networkId, path, askConfirm, accountsLength, accountsOffset } = {
+  const { networkId, pathTemplate, askConfirm, accountsLength, accountsOffset } = {
     ...defaultOptions,
     ...options
   };
-  if (!allowedHdPaths.some(hdPref => path.startsWith(hdPref))) {
-    throw makeError(
-      "Ledger derivation path allowed are " +
-        allowedHdPaths.join(", ") +
-        ". " +
-        path +
-        " is not supported",
-      "InvalidDerivationPath"
-    );
-  }
-
-  const pathComponents = obtainPathComponentsFromDerivationPath(path);
 
   const addressToPathMap = {};
   let lastAddresses = {}
@@ -97,8 +86,7 @@ export default function createLedgerSubprovider(
     const eth = new AppEth(await transport);
     const addresses = {};
     for (let i = accountsOffset; i < accountsOffset + accountsLength; i++) {
-      const path =
-        pathComponents.basePath + (pathComponents.index + i).toString();
+      const path = pathFromIndex(pathTemplate, i)
       const address = await eth.getAddress(path, askConfirm, false);
       if (lastAddresses[path] == address.address) {
         // If this address matches the same one from the last call, short circuit and return that

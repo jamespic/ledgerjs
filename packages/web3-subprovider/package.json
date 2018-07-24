@@ -36,12 +36,15 @@
     "web3-provider-engine": "^14.0.2"
   },
   "devDependencies": {
+    "chai": "^4.1.2",
     "flow-bin": "^0.68.0",
-    "flow-typed": "^2.4.0"
+    "flow-typed": "^2.4.0",
+    "mocha": "^5.2.0"
   },
   "scripts": {
     "flow": "flow",
     "clean": "rm -rf lib/",
+    "test": "mocha",
     "build": "cd ../.. && export PATH=$(yarn bin):$PATH && cd - && babel --source-maps -d lib src && flow-copy-source -v src lib",
     "watch": "cd ../.. && export PATH=$(yarn bin):$PATH && cd - && babel --watch --source-maps -d lib src & flow-copy-source -w -v src lib"
   }
