@@ -74,7 +74,7 @@ export default function createLedgerSubprovider(
   transport: Promise<Transport<*>>,
   options?: SubproviderOptions
 ): HookedWalletSubprovider {
-  const { networkId, pathTemplate, askConfirm, accountsLength, accountsOffset } = {
+  const { networkId, path: pathTemplate, askConfirm, accountsLength, accountsOffset } = {
     ...defaultOptions,
     ...options
   };
